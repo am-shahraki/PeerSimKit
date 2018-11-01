@@ -45,9 +45,6 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
     // The list of neighbors known by this node, or the cache.
     private List<Entry> cache;
 
-    // The subset of neighbors known by this node, randomly taken from cache.
-    private List<Entry> currentSubset;
-
     // The maximum size of the cache;
     private final int size;
 
@@ -86,7 +83,6 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
         // Implement the shuffling protocol using the following steps (or
         // you can design a similar algorithm):
         // Let's name this node as P
-
         // 1. If P is waiting for a response from a shuffling operation initiated in a previous cycle, return;
         if (waitShuffleResponse == true) {
             return;
@@ -110,14 +106,15 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
 
         for (int i = 0; i < l - 1 && tmpCache.size() > 0; i++) {
             int index = CommonState.r.nextInt(tmpCache.size());
-            System.out.println("index:" + index + " degree:" + tmpCache.size() + " size:" + tmpCache.size());
+            //System.out.println("size:"+size+" cache.size()"+cache.size());
             Entry tmpEntry = tmpCache.remove(index);
+
             tmpEntry.setSentTo(Q);
             subset.add(tmpEntry);
         }
         // 6. Add P to the subset;
         subset.add(new Entry(P));
-        currentSubset = new ArrayList<>(subset);
+
         // 7. Send a shuffle request to Q containing the subset;
         //	  - Keep track of the nodes sent to Q
         //	  - Example code for sending a message:
@@ -137,53 +134,57 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
      * @see peersim.edsim.EDProtocol#processEvent(peersim.core.Node, int, java.lang.Object)
      */
     @Override
-    public void processEvent(Node node, int pid, Object event) {
+    public void processEvent(Node Q, int pid, Object event) {
         // Let's name this node as Q;
         // Q receives a message from P;
         //	  - Cast the event object to a message:
         GossipMessage message = (GossipMessage) event;
+        ArrayList<Entry> subsetOfQ = null;
 
         switch (message.getType()) {
             // If the message is a shuffle request:
             case SHUFFLE_REQUEST:
                 //	  1. If Q is waiting for a response from a shuffling initiated in a previous cycle, send back to P a message rejecting the shuffle request;
+                Node P = message.getNode();
+
                 if (waitShuffleResponse) {
-                    sendShuffleMessage(message.getNode(), node, message.getShuffleList(), pid, MessageType.SHUFFLE_REJECTED);
+                    /*for(int i = 0; i < message.getShuffleList().size();i++){
+                        message.getShuffleList().get(i).setSentTo(P);
+                    }*/
+                    sendShuffleMessage(Q, P,  message.getShuffleList(), pid, MessageType.SHUFFLE_REJECTED);
                     return;
                 }
                 //	  2. Q selects a random subset of size l of its own neighbors;
                 List<Entry> tmpCache = new ArrayList<>(cache);
-                ArrayList<Entry> subset = new ArrayList<>(l - 1);
+                subsetOfQ = new ArrayList<>(l);
 
-                for (int i = 0; i < l - 1 && tmpCache.size() > 0; i++) {
+                for (int i = 0; i < l && tmpCache.size() > 0; i++) {
                     int index = CommonState.r.nextInt(tmpCache.size());
-                    System.out.println("index:" + index + " degree:" + tmpCache.size() + " size:" + tmpCache.size());
+                    //System.out.println("index:" + index + " degree:" + tmpCache.size() + " size:" + tmpCache.size());
                     Entry tmpEntry = tmpCache.remove(index);
-                    tmpEntry.setSentTo(message.getNode());
-                    subset.add(tmpEntry);
+                    tmpEntry.setSentTo(P);
+                    subsetOfQ.add(tmpEntry);
                 }
                 //TODO check if adding node Q required
                 //	  3. Q reply P's shuffle request by sending back its own subset;
-                sendShuffleMessage(message.getNode(), node, subset, pid, MessageType.SHUFFLE_REPLY);
+                sendShuffleMessage(Q, P, subsetOfQ, pid, MessageType.SHUFFLE_REPLY);
                 //	  4. Q updates its cache to include the neighbors sent by P:
                 //		 - No neighbor appears twice in the cache
                 //		 - Use empty cache slots to add the new entries
                 //		 - If the cache is full, you can replace entries among the ones sent to P with the new ones
 
                 while (message.getShuffleList().size() > 0) {
-                    Entry entry = message.getShuffleList().remove(0);
-                    entry.setSentTo(node);
+                    Entry entry = message.getShuffleList().remove(CommonState.r.nextInt(message.getShuffleList().size()));
+
                     if (degree() < size && !contains(entry.getNode())) {
                         addNeighbor(entry.getNode());
                     } else if (degree() >= size && !contains(entry.getNode())) {
-                        cache.remove(subset.remove(CommonState.r.nextInt(subset.size())));
+                        cache.remove(getRemovableIndex(message.getNode()));
                         addNeighbor(entry.getNode());
                     } else {
                         continue;
                     }
                 }
-
-
                 break;
 
             // If the message is a shuffle reply:
@@ -194,15 +195,18 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
                 //		 - Use empty cache slots to add new entries
                 //		 - If the cache is full, you can replace entries among the ones originally sent to P with the new ones
 
-                while (message.getShuffleList().size() > 0) {
+                List subsetOfP = new ArrayList(message.getShuffleList());
 
-                    Entry entry = message.getShuffleList().remove(0);
+                while (message.getShuffleList().size() > 0) {
+                    Entry entry = message.getShuffleList().remove(CommonState.r.nextInt(message.getShuffleList().size()));
                     if (degree() < size && !contains(entry.getNode())) {
                         addNeighbor(entry.getNode());
                     } else if (degree() >= size && !contains(entry.getNode())) {
-                        cache.remove(currentSubset.remove(CommonState.r.nextInt(currentSubset.size())));
+                        cache.remove(getRemovableIndex(message.getNode()));
                         addNeighbor(entry.getNode());
                     }
+                    else continue;
+
                 }
                 //	  3. Q is no longer waiting for a shuffle reply;
                 for (int i = 0; i < cache.size(); i++) {
@@ -214,8 +218,8 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
             // If the message is a shuffle rejection:
             case SHUFFLE_REJECTED:
                 //	  1. If P was originally removed from Q's cache, add it again to the cache.
-                if (!contains(node)) {
-                    addNeighbor(node);
+                if (!contains(message.getNode())) {
+                    addNeighbor(message.getNode());
                 }
                 for (int i = 0; i < cache.size(); i++) {
                     cache.get(i).setSentTo(null);
@@ -228,6 +232,19 @@ public class BasicShuffle implements Linkable, EDProtocol, CDProtocol {
                 break;
         }
 
+    }
+
+    private int getRemovableIndex(Node node) {
+        for (int i = 0; i < cache.size(); i++) {
+            if (cache.get(i).getSentTo() != null) {
+                //System.out.println("Index "+i+" getSentTo:"+cache.get(i).getSentTo().getID());
+                if (node.getID() == cache.get(i).getSentTo().getID()) {
+                    //System.out.println("############## index found");
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     private void sendShuffleMessage(Node pNode, Node qNode, List<Entry> subset, int protocolID, MessageType messageType) {

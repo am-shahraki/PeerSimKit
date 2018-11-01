@@ -14,10 +14,6 @@ network.size SIZE
 simulation.endtime CYCLE*CYCLES
 simulation.logtime CYCLE
 
-# the cache size should be set to 30 and to 50.
-CACHESIZE 30
-
-
 protocol.tr UniformRandomTransport
 {
 	mindelay (CYCLE*MINDELAY)/100
@@ -26,7 +22,8 @@ protocol.tr UniformRandomTransport
 
 protocol.gossip example.gossip.BasicShuffle
 {
-	cacheSize CACHESIZE
+	# the cache size should be set to 30 and to 50.
+	cacheSize 30
 	shuffleLength 8
 
 	step CYCLE
@@ -34,18 +31,18 @@ protocol.gossip example.gossip.BasicShuffle
 	period CYCLE
 }
 
-#init.wire WireStar
-#{
-#	protocol gossip
-#}
+init.wire WireStar
+{
+	protocol gossip
+}
 
 # This initializes the topology as a ring. Use should also use WireStar to
 # initialize it as a star.
-init.wire WireRingLattice
-{
-	protocol gossip
-	k 1
-}
+#init.wire WireRingLattice
+#{
+#	protocol gossip
+#	k 1
+#}
 
 init.sch CDScheduler
 {
